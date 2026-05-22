@@ -31,14 +31,11 @@ async function notify(title: string, body: string) {
 export default function Dashboard({
   onMenuOpen,
   serial,
-  deviceName,
 }: {
   onMenuOpen: () => void;
   serial?: string;
-  deviceName?: string;
 }) {
   const [status, setStatus] = useState<PrinterStatus | null>(null);
-  const [localName, setLocalName] = useState('');
   const [frameData, setFrameData] = useState<string | null>(null);
   const [printPreview, setPrintPreview] = useState<string | null>(null);
   const [lightOn, setLightOn] = useState(false);
@@ -98,12 +95,9 @@ export default function Dashboard({
       setFrameData(`data:image/jpeg;base64,${e.payload}`),
     );
 
-    const unlistenName = listen<string>('printer-name', (e) => setLocalName(e.payload));
-
     return () => {
       unlistenStatus.then((f) => f());
       unlistenCamera.then((f) => f());
-      unlistenName.then((f) => f());
     };
   }, []);
 
@@ -180,9 +174,6 @@ export default function Dashboard({
         </button>
         <div className='flex flex-col items-center'>
           <h1 className='font-semibold text-lg'>BambooMobile</h1>
-          <span className='text-xs text-yellow-400 font-mono'>
-            prop: "{deviceName ?? ''}" | event: "{localName}"
-          </span>
         </div>
       </div>
 
@@ -435,7 +426,11 @@ export default function Dashboard({
         </div>
       </PullToRefresh>
 
-      {/* <ErrorPopup codes={popupCodes} serial={serial} onDismiss={() => setPopupCodes([])} /> */}
+      <ErrorPopup
+        codes={popupCodes}
+        serial={serial}
+        onDismiss={() => setPopupCodes([])}
+      />
     </div>
   );
 }

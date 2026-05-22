@@ -37,7 +37,7 @@ export default function PrintStatusCard({
       <div
         className={`grid ${printPreview ? 'grid-cols-[auto_1fr]' : ''} gap-4`}>
         {/* PREVIEW */}
-        {printPreview && status?.subtask_name && (
+        {(isActive || isFinished) && printPreview && status?.subtask_name && (
           <div className='size-32 overflow-clip flex items-center justify-center'>
             <img
               src={printPreview}
@@ -49,10 +49,10 @@ export default function PrintStatusCard({
 
         {/* INFO AND CONTROLS  */}
         <div className='flex flex-col gap-4'>
-          {status?.subtask_name && (
+          {(isActive || isFinished) && status?.subtask_name && (
             <span className='my-auto opacity-75'>{status.subtask_name}</span>
           )}
-          {isActive ? (
+          {isActive ?
             <div className='grid grid-cols-[auto_auto] justify-between gap-2 w-full'>
               <span className='w-full'>Printed Layers</span>
               <span className='text-end'>
@@ -66,9 +66,10 @@ export default function PrintStatusCard({
               </span>
               <ProgressBar percent={status.progress} />
             </div>
-          ) : (
-            <div className='flex items-center gap-3'>
-              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${stateDot}`} />
+          : <div className='flex items-center gap-3 -mb-4'>
+              <span
+                className={`w-2.5 h-2.5 rounded-full shrink-0 ${stateDot}`}
+              />
               <div className='flex flex-col'>
                 <span className='text-white font-semibold'>{stateLabel}</span>
                 {(isFinished || isFailed) && status.total_layer_num > 0 && (
@@ -76,12 +77,17 @@ export default function PrintStatusCard({
                     {status.layer_num} / {status.total_layer_num} layers
                   </span>
                 )}
-                {!isFinished && !isFailed && status.stage && status.stage !== 'Idle' && (
-                  <span className='text-zinc-400 text-sm'>{status.stage}</span>
-                )}
+                {!isFinished &&
+                  !isFailed &&
+                  status.stage &&
+                  status.stage !== 'Idle' && (
+                    <span className='text-zinc-400 text-sm'>
+                      {status.stage}
+                    </span>
+                  )}
               </div>
             </div>
-          )}
+          }
         </div>
       </div>
       <div className='grid grid-cols-[1fr_2px_1fr_2px_1fr] gap-2 pt-4 text-zinc-400 tracking-wide font-semibold'>

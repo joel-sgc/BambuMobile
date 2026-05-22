@@ -6,6 +6,7 @@ export interface PrinterConfig {
   ip: string;
   accessCode: string;
   serial: string;
+  deviceName?: string;
 }
 
 export interface AmsTray {

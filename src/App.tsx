@@ -30,8 +30,10 @@ export default function App() {
   );
   const [deviceName, setDeviceName] = useState('');
   const backActionRef = useRef<() => boolean>(() => false);
+  const activePrinterIdRef = useRef<string | null>(null);
 
   const activePrinter = printers.find((p) => p.id === activePrinterId) ?? null;
+  activePrinterIdRef.current = activePrinterId;
 
   async function persistPrinters(
     list: PrinterConfig[],
@@ -46,7 +48,7 @@ export default function App() {
   async function connectTo(printer: PrinterConfig) {
     setPhase('connecting');
     setConnectError('');
-    setDeviceName('');
+    setDeviceName(printer.deviceName ?? '');
     try {
       await invoke('disconnect_printer').catch(() => {});
       await invoke('connect_printer', {
@@ -69,9 +71,20 @@ export default function App() {
   }
 
   useEffect(() => {
-    const unsub = listen<string>('printer-name', (e) => setDeviceName(e.payload));
+    const unsub = listen<string>('printer-name', (e) => {
+      const name = e.payload;
+      setDeviceName(name);
+      setPrinters((prev) => {
+        const updated = prev.map((p) => {
+          if (p.id !== activePrinterIdRef.current) return p;
+          return { ...p, deviceName: name };
+        });
+        persistPrinters(updated, activePrinterIdRef.current);
+        return updated;
+      });
+    });
     return () => { unsub.then((f) => f()); };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     (async () => {
@@ -192,7 +205,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const arm = () => window.history.pushState(null, '', window.location.href);
+    const arm = () => window.history.pushState(null, '', window.location.pathname + '#step=' + Date.now());
     arm();
     const handle = () => {
       if (backActionRef.current()) arm();
@@ -233,7 +246,6 @@ export default function App() {
       <PrinterManager
         printers={printers}
         activePrinterId={activePrinterId}
-        deviceName={deviceName}
         onSwitch={handleSwitch}
         onEdit={(p) => {
           setEditingPrinter(p);
@@ -264,7 +276,6 @@ export default function App() {
         <Dashboard
           onMenuOpen={() => setSidebarOpen(true)}
           serial={activePrinter?.serial}
-          deviceName={deviceName}
         />
       )}
 

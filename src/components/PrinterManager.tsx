@@ -1,9 +1,9 @@
 import type { PrinterConfig } from '../vite-env';
+import { serialToModel } from '../utils/hmsErrors';
 
 export default function PrinterManager({
   printers,
   activePrinterId,
-  deviceName,
   onSwitch,
   onEdit,
   onDelete,
@@ -12,7 +12,6 @@ export default function PrinterManager({
 }: {
   printers: PrinterConfig[];
   activePrinterId: string | null;
-  deviceName?: string;
   onSwitch: (printer: PrinterConfig) => void;
   onEdit: (printer: PrinterConfig) => void;
   onDelete: (id: string) => void;
@@ -49,6 +48,8 @@ export default function PrinterManager({
 
         {printers.map((printer) => {
           const isActive = printer.id === activePrinterId;
+          const model = serialToModel(printer.serial);
+          const displayName = printer.nickname || printer.deviceName || (model ? `My ${model}` : printer.ip);
           return (
             <div
               key={printer.id}
@@ -61,13 +62,9 @@ export default function PrinterManager({
                 <div className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-teal-400' : 'bg-zinc-600'}`} />
                 <div className='flex flex-col min-w-0'>
                   <span className={`font-medium text-sm truncate ${isActive ? 'text-teal-300' : 'text-white'}`}>
-                    {printer.nickname}
+                    {displayName}
                   </span>
-                  {isActive && deviceName ? (
-                    <span className='text-teal-600 text-xs truncate'>{deviceName}</span>
-                  ) : (
-                    <span className='text-zinc-500 text-xs font-mono truncate'>{printer.ip}</span>
-                  )}
+                  <span className='text-zinc-500 text-xs font-mono truncate'>{printer.ip}</span>
                 </div>
                 {isActive && (
                   <span className='text-teal-500 text-xs font-medium shrink-0 ml-auto mr-2'>Active</span>

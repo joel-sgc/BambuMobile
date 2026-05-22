@@ -21,6 +21,7 @@ const isVideo = (n: string) =>
   VIDEO_EXTS.some((e) => n.toLowerCase().endsWith(e));
 const isImage = (n: string) =>
   IMAGE_EXTS.some((e) => n.toLowerCase().endsWith(e));
+const isGcode = (n: string) => n.toLowerCase().endsWith('.gcode');
 
 function canPreview(name: string) {
   return isImage(name) || isVideo(name);
@@ -70,6 +71,11 @@ export default function FileManager({
   const [openMenuName, setOpenMenuName] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [printConfirm, setPrintConfirm] = useState<{ path: string; name: string } | null>(null);
+  const [bedLeveling, setBedLeveling] = useState(true);
+  const [timelapse, setTimelapse] = useState(false);
+  const [useAms, setUseAms] = useState(true);
+  const [printing, setPrinting] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPressRef = useRef(false);
 
@@ -239,6 +245,28 @@ export default function FileManager({
     if (errors.length > 0) setError(errors.join('\n'));
     else
       showToast(`Deleted ${names.length} item${names.length > 1 ? 's' : ''}`);
+  }
+
+  // ── Print ───────────────────────────────────────────────────────────────────
+
+  async function handlePrint() {
+    if (!printConfirm) return;
+    setPrinting(true);
+    try {
+      await invoke('start_print', {
+        path: printConfirm.path,
+        bedLeveling,
+        flowCali: false,
+        timelapse,
+        useAms,
+      });
+      setPrintConfirm(null);
+      showToast('Print started');
+    } catch (e) {
+      showToast(String(e), false);
+    } finally {
+      setPrinting(false);
+    }
   }
 
   // ── Navigation ──────────────────────────────────────────────────────────────
@@ -502,6 +530,16 @@ export default function FileManager({
                           d='M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z'
                         />
                       </svg>
+                    : isGcode(entry.name) ?
+                      <svg
+                        className='w-5 h-5 text-green-500'
+                        fill='none'
+                        viewBox='0 0 24 24'
+                        stroke='currentColor'
+                        strokeWidth={1.5}>
+                        <path strokeLinecap='round' strokeLinejoin='round' d='M6 3h12M6 8h12M6 13h6m-6 5h4' />
+                        <path strokeLinecap='round' strokeLinejoin='round' d='M16 17l2 2 4-4' />
+                      </svg>
                     : <svg
                         className='w-5 h-5'
                         fill='none'
@@ -567,6 +605,20 @@ export default function FileManager({
           <div
             className='fixed z-50 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden min-w-36'
             style={{ top: menuPos.top, right: menuPos.right }}>
+            {!menuEntry.is_dir && isGcode(openMenuName) && (
+              <button
+                onClick={() => {
+                  setOpenMenuName(null);
+                  const fullPath = (path.endsWith('/') ? path : path + '/') + openMenuName;
+                  setPrintConfirm({ path: fullPath, name: openMenuName });
+                }}
+                className='flex items-center gap-2.5 w-full px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-700 transition-colors text-left'>
+                <svg className='w-4 h-4 text-teal-400' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth={1.75}>
+                  <path strokeLinecap='round' strokeLinejoin='round' d='M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z' />
+                </svg>
+                Print
+              </button>
+            )}
             {!menuEntry.is_dir && canPreview(openMenuName) && (
               <button
                 onClick={() => handlePreview(openMenuName)}
@@ -650,6 +702,51 @@ export default function FileManager({
             alt='Preview'
           />
         </div>
+      )}
+
+      {/* Print confirmation sheet */}
+      {printConfirm && (
+        <>
+          <div className='fixed inset-0 z-50 bg-black/70' onClick={() => !printing && setPrintConfirm(null)} />
+          <div className='fixed bottom-0 left-0 right-0 z-50 bg-zinc-900 rounded-t-2xl p-6 flex flex-col gap-5'
+               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.5rem)' }}>
+            <div className='flex flex-col gap-1'>
+              <h2 className='text-white font-semibold text-lg'>Start Print</h2>
+              <p className='text-zinc-500 text-sm truncate'>{printConfirm.name}</p>
+            </div>
+
+            <div className='flex flex-col gap-0 bg-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-700/50'>
+              {([
+                { label: 'Bed Leveling', value: bedLeveling, set: setBedLeveling },
+                { label: 'Timelapse', value: timelapse, set: setTimelapse },
+                { label: 'Use AMS', value: useAms, set: setUseAms },
+              ] as const).map(({ label, value, set }) => (
+                <button
+                  key={label}
+                  onClick={() => set(!value)}
+                  className='flex items-center justify-between px-4 py-3.5 text-left'>
+                  <span className='text-white text-sm'>{label}</span>
+                  <div className={`w-11 h-6 rounded-full transition-colors relative ${value ? 'bg-teal-500' : 'bg-zinc-600'}`}>
+                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={handlePrint}
+              disabled={printing}
+              className='bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white font-semibold rounded-xl py-3.5 transition-colors'>
+              {printing ? 'Starting…' : 'Start Print'}
+            </button>
+            <button
+              onClick={() => setPrintConfirm(null)}
+              disabled={printing}
+              className='text-zinc-500 text-sm font-medium py-1'>
+              Cancel
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

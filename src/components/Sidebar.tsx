@@ -1,4 +1,5 @@
 import type { PrinterConfig } from '../vite-env';
+import { serialToModel } from '../utils/hmsErrors';
 
 export type Page = 'dashboard' | 'files' | 'timelapses' | 'printers' | 'printer-settings' | 'debug';
 
@@ -69,6 +70,11 @@ export default function Sidebar({
   activePrinter: PrinterConfig | null;
   deviceName?: string;
 }) {
+  const model = activePrinter ? serialToModel(activePrinter.serial) : null;
+  const displayName = activePrinter
+    ? activePrinter.nickname || deviceName || (model ? `My ${model}` : activePrinter.ip)
+    : '';
+
   return (
     <>
       <div
@@ -100,12 +106,8 @@ export default function Sidebar({
             className='flex items-center gap-3 mx-3 mt-3 px-3 py-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-colors text-left'>
             <div className='w-2 h-2 rounded-full bg-teal-400 shrink-0' />
             <div className='flex flex-col min-w-0 flex-1'>
-              <span className='text-white text-sm font-medium truncate'>{activePrinter.nickname}</span>
-              {deviceName ? (
-                <span className='text-teal-600 text-xs truncate'>{deviceName}</span>
-              ) : (
-                <span className='text-zinc-500 text-xs font-mono truncate'>{activePrinter.ip}</span>
-              )}
+              <span className='text-white text-sm font-medium truncate'>{displayName}</span>
+              <span className='text-zinc-500 text-xs font-mono truncate'>{activePrinter.ip}</span>
             </div>
             <svg className='w-4 h-4 text-zinc-500 shrink-0' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth={2}>
               <path strokeLinecap='round' strokeLinejoin='round' d='M8 9l4-4 4 4m0 6l-4 4-4-4' />

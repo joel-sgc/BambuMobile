@@ -293,6 +293,49 @@ fn stage_name(stg: u64) -> String {
 // Multicast NOTIFY (bonus): listen on 239.255.255.250:1900 for the printer's
 // periodic 5-second broadcasts — local network only.
 
+// ── UPnP device description via plain HTTP on port 80 ────────────────────────
+// The printer's SSDP Location header points to http://<ip>/ which serves a
+// standard UPnP XML description containing <friendlyName> — the user-set name.
+// Plain TCP to port 80 routes fine over Tailscale or any VPN.
+
+async fn fetch_upnp_name(ip: &str, app: &AppHandle) -> Option<String> {
+    let _ = app.emit("ssdp-debug", format!("[upnp] trying http://{}:80/", ip));
+
+    let mut stream = match tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        tokio::net::TcpStream::connect(format!("{}:80", ip)),
+    ).await {
+        Ok(Ok(s)) => s,
+        _ => {
+            let _ = app.emit("ssdp-debug", format!("[upnp] port 80 not reachable on {}", ip));
+            return None;
+        }
+    };
+
+    let req = format!("GET / HTTP/1.0\r\nHost: {}\r\n\r\n", ip);
+    if stream.write_all(req.as_bytes()).await.is_err() { return None; }
+
+    let mut buf = Vec::new();
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        stream.read_to_end(&mut buf),
+    ).await;
+
+    let text = String::from_utf8_lossy(&buf);
+    let _ = app.emit("ssdp-debug", format!("[upnp] response ({} bytes): {}", buf.len(), &text[..text.len().min(400)]));
+
+    // UPnP XML: <friendlyName>My P1S</friendlyName>
+    if let Some(start) = text.find("<friendlyName>") {
+        let rest = &text[start + "<friendlyName>".len()..];
+        if let Some(end) = rest.find("</friendlyName>") {
+            let name = rest[..end].trim().to_string();
+            if !name.is_empty() { return Some(name); }
+        }
+    }
+
+    None
+}
+
 fn ssdp_extract_name(msg: &str, serial_upper: &str) -> Option<String> {
     // Accept the packet if it mentions our serial (case-insensitive) OR if serial
     // is empty. This handles the rare case of a misconfigured serial entry.
@@ -342,42 +385,44 @@ async fn ssdp_name_loop(ip: String, serial: String, status: Arc<Mutex<PrinterSta
         tokio::spawn(async move { ssdp_port_listen(2021, su, st, ap).await; });
     }
 
-    // M-SEARCH loop: send to the SSDP multicast group (triggers LAN response)
-    // AND unicast directly to the printer (for Tailscale where multicast can't route).
+    // Main discovery loop — runs every 30 s, tries all unicast methods.
     let targets = [
         "239.255.255.250:1900".to_string(), // multicast — standard SSDP, works on LAN
         format!("{}:1900", ip),             // unicast to printer — works over Tailscale
         format!("{}:2021", ip),             // unicast on Bambu's alternate port
     ];
     loop {
-        match tokio::net::UdpSocket::bind("0.0.0.0:0").await {
-            Err(e) => { let _ = app.emit("ssdp-debug", format!("[msearch] bind failed: {}", e)); }
-            Ok(sock) => {
-                for target in &targets {
-                    match sock.send_to(msearch.as_bytes(), target).await {
-                        Err(e) => { let _ = app.emit("ssdp-debug", format!("[msearch] send to {} failed: {}", target, e)); }
-                        Ok(_)  => { let _ = app.emit("ssdp-debug", format!("[msearch] sent to {}", target)); }
-                    }
+        // UPnP HTTP — plain TCP, works over Tailscale
+        if let Some(name) = fetch_upnp_name(&ip, &app).await {
+            ssdp_apply(name, &status, &app).await;
+        }
+
+        // SSDP M-SEARCH
+        if let Ok(sock) = tokio::net::UdpSocket::bind("0.0.0.0:0").await {
+            for target in &targets {
+                match sock.send_to(msearch.as_bytes(), target).await {
+                    Err(e) => { let _ = app.emit("ssdp-debug", format!("[msearch] send to {} failed: {}", target, e)); }
+                    Ok(_)  => { let _ = app.emit("ssdp-debug", format!("[msearch] sent to {}", target)); }
                 }
-                // Collect any responses that arrive within 5 s
-                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-                let mut buf = vec![0u8; 2048];
-                loop {
-                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                    if remaining.is_zero() { break; }
-                    match tokio::time::timeout(remaining, sock.recv_from(&mut buf)).await {
-                        Ok(Ok((len, src))) => {
-                            let msg = String::from_utf8_lossy(&buf[..len]).to_string();
-                            let _ = app.emit("ssdp-debug", format!("[msearch] response from {}: {}", src, &msg[..msg.len().min(300)]));
-                            if let Some(name) = ssdp_extract_name(&msg, &serial_upper) {
-                                ssdp_apply(name, &status, &app).await;
-                            }
+            }
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut buf = vec![0u8; 2048];
+            loop {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() { break; }
+                match tokio::time::timeout(remaining, sock.recv_from(&mut buf)).await {
+                    Ok(Ok((len, src))) => {
+                        let msg = String::from_utf8_lossy(&buf[..len]).to_string();
+                        let _ = app.emit("ssdp-debug", format!("[msearch] response from {}: {}", src, &msg[..msg.len().min(300)]));
+                        if let Some(name) = ssdp_extract_name(&msg, &serial_upper) {
+                            ssdp_apply(name, &status, &app).await;
                         }
-                        _ => break,
                     }
+                    _ => break,
                 }
             }
         }
+
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
     }
 }
@@ -1425,6 +1470,51 @@ async fn delete_entry(path: String, state: TauriState<'_, AppState>) -> Result<(
     .map_err(|e| e.to_string())?
 }
 
+// ── Print from SD card ────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn start_print(
+    path: String,
+    bed_leveling: bool,
+    flow_cali: bool,
+    timelapse: bool,
+    use_ams: bool,
+    state: TauriState<'_, AppState>,
+) -> Result<(), String> {
+    let conn = state.connection.lock().await;
+    let c = conn.as_ref().ok_or("Not connected")?;
+    let filename = path.split('/').last().unwrap_or(&path).to_owned();
+    let subtask_name = filename
+        .strip_suffix(".gcode")
+        .or_else(|| filename.strip_suffix(".GCODE"))
+        .unwrap_or(&filename)
+        .to_owned();
+    let url = format!("ftp://{}{}", c.ip, path);
+    let topic = format!("device/{}/request", c.serial);
+    let payload = serde_json::json!({
+        "print": {
+            "sequence_id": "0",
+            "command": "project_file",
+            "param": path,
+            "subtask_name": subtask_name,
+            "url": url,
+            "timelapse": timelapse,
+            "bed_type": "auto",
+            "bed_leveling": bed_leveling,
+            "flow_cali": flow_cali,
+            "vibration_cali": true,
+            "layer_inspect": false,
+            "use_ams": use_ams,
+            "task_id": "0",
+            "profile_id": "0"
+        }
+    });
+    c.mqtt_client
+        .publish(&topic, QoS::AtMostOnce, false, payload.to_string())
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ── Debug helpers ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -1483,6 +1573,7 @@ pub fn run() {
             download_file,
             inject_test_hms,
             debug_send_request,
+            start_print,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

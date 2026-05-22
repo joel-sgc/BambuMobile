@@ -24,7 +24,7 @@ export default function SettingsPanel({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSave({ nickname: nickname.trim() || ip, ip, accessCode, serial });
+    onSave({ nickname: nickname.trim(), ip, accessCode, serial });
   }
 
   return (

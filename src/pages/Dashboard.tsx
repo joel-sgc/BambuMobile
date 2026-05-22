@@ -10,14 +10,14 @@ import type { PrinterStatus } from '../vite-env';
 import { hmsDescription } from '../utils/hmsErrors';
 import PullToRefresh from 'react-simple-pull-to-refresh';
 
-import Section from './Section';
-import PrintStatusCard from './PrintStatusCard';
-import TempGauge from './TempGauge';
-import AmsView from './AmsView';
-import ExternalSpool from './ExternalSpool';
-import SpeedGauge from './SpeedGauge';
-import JogControls from './JogControls';
-import ErrorPopup from './ErrorPopup';
+import Section from '../components/Section';
+import PrintStatusCard from '../components/PrintStatusCard';
+import TempGauge from '../components/TempGauge';
+import AmsView from '../components/AmsView';
+import ExternalSpool from '../components/ExternalSpool';
+import SpeedGauge from '../components/SpeedGauge';
+import JogControls from '../components/JogControls';
+import ErrorPopup from '../components/ErrorPopup';
 
 async function notify(title: string, body: string) {
   let granted = await isPermissionGranted();
@@ -25,7 +25,8 @@ async function notify(title: string, body: string) {
     const perm = await requestPermission();
     granted = perm === 'granted';
   }
-  if (granted) sendNotification({ title, body });
+
+  if (granted) sendNotification({ title, body, largeBody: body });
 }
 
 export default function Dashboard({

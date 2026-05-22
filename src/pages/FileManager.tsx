@@ -71,7 +71,10 @@ export default function FileManager({
   const [openMenuName, setOpenMenuName] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
-  const [printConfirm, setPrintConfirm] = useState<{ path: string; name: string } | null>(null);
+  const [printConfirm, setPrintConfirm] = useState<{
+    path: string;
+    name: string;
+  } | null>(null);
   const [bedLeveling, setBedLeveling] = useState(true);
   const [timelapse, setTimelapse] = useState(false);
   const [useAms, setUseAms] = useState(true);
@@ -133,7 +136,7 @@ export default function FileManager({
 
   // ── Dropdown menu ───────────────────────────────────────────────────────────
 
-  function openMenu(name: string, e: React.PointerEvent<HTMLButtonElement>) {
+  function openMenu(name: string, e: React.MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
     cancelLongPress();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -468,7 +471,8 @@ export default function FileManager({
                   onPointerDown={() => startLongPress(entry.name)}
                   onPointerUp={cancelLongPress}
                   onPointerCancel={cancelLongPress}
-                  onPointerMove={cancelLongPress}>
+                  onPointerLeave={cancelLongPress}
+                  onContextMenu={(e) => e.preventDefault()}>
                   {/* Checkbox (select mode — all items) */}
                   {selectMode && (
                     <button
@@ -537,8 +541,16 @@ export default function FileManager({
                         viewBox='0 0 24 24'
                         stroke='currentColor'
                         strokeWidth={1.5}>
-                        <path strokeLinecap='round' strokeLinejoin='round' d='M6 3h12M6 8h12M6 13h6m-6 5h4' />
-                        <path strokeLinecap='round' strokeLinejoin='round' d='M16 17l2 2 4-4' />
+                        <path
+                          strokeLinecap='round'
+                          strokeLinejoin='round'
+                          d='M6 3h12M6 8h12M6 13h6m-6 5h4'
+                        />
+                        <path
+                          strokeLinecap='round'
+                          strokeLinejoin='round'
+                          d='M16 17l2 2 4-4'
+                        />
                       </svg>
                     : <svg
                         className='w-5 h-5'
@@ -577,7 +589,8 @@ export default function FileManager({
                   {/* ⋮ menu button (normal mode only) */}
                   {!selectMode && (
                     <button
-                      onPointerDown={(e) => openMenu(entry.name, e)}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => openMenu(entry.name, e)}
                       className='shrink-0 w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors'>
                       <svg
                         className='w-4 h-4'
@@ -609,12 +622,22 @@ export default function FileManager({
               <button
                 onClick={() => {
                   setOpenMenuName(null);
-                  const fullPath = (path.endsWith('/') ? path : path + '/') + openMenuName;
+                  const fullPath =
+                    (path.endsWith('/') ? path : path + '/') + openMenuName;
                   setPrintConfirm({ path: fullPath, name: openMenuName });
                 }}
                 className='flex items-center gap-2.5 w-full px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-700 transition-colors text-left'>
-                <svg className='w-4 h-4 text-teal-400' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth={1.75}>
-                  <path strokeLinecap='round' strokeLinejoin='round' d='M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z' />
+                <svg
+                  className='w-4 h-4 text-teal-400'
+                  fill='none'
+                  viewBox='0 0 24 24'
+                  stroke='currentColor'
+                  strokeWidth={1.75}>
+                  <path
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                    d='M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z'
+                  />
                 </svg>
                 Print
               </button>
@@ -707,27 +730,44 @@ export default function FileManager({
       {/* Print confirmation sheet */}
       {printConfirm && (
         <>
-          <div className='fixed inset-0 z-50 bg-black/70' onClick={() => !printing && setPrintConfirm(null)} />
-          <div className='fixed bottom-0 left-0 right-0 z-50 bg-zinc-900 rounded-t-2xl p-6 flex flex-col gap-5'
-               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.5rem)' }}>
+          <div
+            className='fixed inset-0 z-50 bg-black/70'
+            onClick={() => !printing && setPrintConfirm(null)}
+          />
+          <div
+            className='fixed bottom-0 left-0 right-0 z-50 bg-zinc-900 rounded-t-2xl p-6 flex flex-col gap-5'
+            style={{
+              paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.5rem)',
+            }}>
             <div className='flex flex-col gap-1'>
               <h2 className='text-white font-semibold text-lg'>Start Print</h2>
-              <p className='text-zinc-500 text-sm truncate'>{printConfirm.name}</p>
+              <p className='text-zinc-500 text-sm truncate'>
+                {printConfirm.name}
+              </p>
             </div>
 
             <div className='flex flex-col gap-0 bg-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-700/50'>
-              {([
-                { label: 'Bed Leveling', value: bedLeveling, set: setBedLeveling },
-                { label: 'Timelapse', value: timelapse, set: setTimelapse },
-                { label: 'Use AMS', value: useAms, set: setUseAms },
-              ] as const).map(({ label, value, set }) => (
+              {(
+                [
+                  {
+                    label: 'Bed Leveling',
+                    value: bedLeveling,
+                    set: setBedLeveling,
+                  },
+                  { label: 'Timelapse', value: timelapse, set: setTimelapse },
+                  { label: 'Use AMS', value: useAms, set: setUseAms },
+                ] as const
+              ).map(({ label, value, set }) => (
                 <button
                   key={label}
                   onClick={() => set(!value)}
                   className='flex items-center justify-between px-4 py-3.5 text-left'>
                   <span className='text-white text-sm'>{label}</span>
-                  <div className={`w-11 h-6 rounded-full transition-colors relative ${value ? 'bg-teal-500' : 'bg-zinc-600'}`}>
-                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  <div
+                    className={`w-11 h-6 rounded-full transition-colors relative ${value ? 'bg-teal-500' : 'bg-zinc-600'}`}>
+                    <div
+                      className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`}
+                    />
                   </div>
                 </button>
               ))}

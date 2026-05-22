@@ -4,14 +4,14 @@ import { listen } from '@tauri-apps/api/event';
 import { load } from '@tauri-apps/plugin-store';
 import type { PrinterConfig } from './vite-env';
 
-import ConnectingScreen from './components/ConnectingScreen';
-import SettingsPanel from './components/SettingsPanel';
-import PrinterManager from './components/PrinterManager';
-import Dashboard from './components/Dashboard';
-import DebugPage from './components/DebugPage';
-import FileManager from './components/FileManager';
-import TimelapseBrowser from './components/TimelapseBrowser';
-import Sidebar, { type Page } from './components/Sidebar';
+import ConnectingScreen from './pages/ConnectingScreen';
+import SettingsPanel from './pages/SettingsPanel';
+import PrinterManager from './pages/PrinterManager';
+import Dashboard from './pages/Dashboard';
+import DebugPage from './pages/DebugPage';
+import FileManager from './pages/FileManager';
+import TimelapseBrowser from './pages/TimelapseBrowser';
+import Sidebar, { type Page } from './pages/Sidebar';
 
 type Phase = 'connecting' | 'connected' | 'error';
 
@@ -83,7 +83,9 @@ export default function App() {
         return updated;
       });
     });
-    return () => { unsub.then((f) => f()); };
+    return () => {
+      unsub.then((f) => f());
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -205,7 +207,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    const arm = () => window.history.pushState(null, '', window.location.pathname + '#step=' + Date.now());
+    const arm = () =>
+      window.history.pushState(
+        null,
+        '',
+        window.location.pathname + '#step=' + Date.now(),
+      );
     arm();
     const handle = () => {
       if (backActionRef.current()) arm();

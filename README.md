@@ -8,7 +8,7 @@ Built with [Tauri v2](https://tauri.app/) (Rust backend) + React/TypeScript fron
 
 ## ⚠️ Disclaimer
 
-Yes, this was vibe coded. Entirely. With Claude. If you don't like it you can either fork it and rewrite it yourself or leave the repo. I don't know Rust and I don't even want to try and understand how BambuLab printers communicate commands. If you want to whine about it, go do it somewhere I can't hear you please.
+Yes, this was vibe coded. Mostly the backend logic, with Claude. If you don't like it you can either fork it and rewrite it yourself or leave the repo. I don't know Rust and I don't even want to try and understand how BambuLab printers communicate commands. There are probably some other features or general bug fixes in here that I forgot to document. If you want to whine about it, go do it somewhere I can't hear you please.
 
 The app works on my P1S, if someone else can test it on their printer that'd be great!
 
@@ -16,9 +16,9 @@ The app works on my P1S, if someone else can test it on their printer that'd be 
 
 ## Screenshots
 
-| Home | File Manager | Timelapses |
-|:----:|:------------:|:----------:|
-| <img src="assets/Home.png" width="220"/> | <img src="assets/File%20Manager.png" width="220"/> | <img src="assets/Timelapse.png" width="220"/> |
+|                   Home                   |                    File Manager                    |                  Timelapses                   |                   Printers                   |
+| :--------------------------------------: | :------------------------------------------------: | :-------------------------------------------: | :------------------------------------------: |
+| <img src="assets/Home.png" width="220"/> | <img src="assets/File%20Manager.png" width="220"/> | <img src="assets/Timelapse.png" width="220"/> | <img src="assets/Printers.png" width="220"/> |
 
 ---
 
@@ -38,17 +38,20 @@ Projects like [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI) document 
 
 ## Features
 
-- 📷 **Live camera feed** — MJPG over TLS on port 6000, pure Rust implementation
-- 📊 **Print status** — progress %, layer counter, stage, remaining time
-- 🌡️ **Temperatures** — nozzle and bed with targets
-- 💡 **Chamber light** toggle
-- 🎛️ **Print speed** — Silent / Standard / Sport / Ludicrous
-- ⏯️ **Print controls** — pause, resume, stop
-- 🧵 **AMS filament info** — per-unit humidity grade (A–E scale), per-slot type and colour
-- 🪡 **External spool** display
-- 🕹️ **Manual jog controls** — OrcaSlicer-style XY wheel, extruder column, Z/bed row with ±1/±10 mm steps and a home button
-- 💾 **Persistent credentials** — stored in app data via `tauri-plugin-store`, not in browser storage
-- 📱 **Android-native** — respects safe area insets, works edge-to-edge
+- 🔄 **Multiple Printer Support** — switch between printers, automatic local network name detection, and per-printer credential storage.
+- 📷 **Live camera feed** — MJPG over TLS on port 6000, pure Rust implementation.
+- 📊 **Print status & Controls** — view progress %, layer counter, remaining time, and start (pre-uploaded gcode), pause, resume, or stop prints.
+- 🗂️ **File Manager & Timelapses** — FTP (port 990) integration to view, download, delete files, and view model previews.
+- 🔔 **App Notifications** — push alerts for print completion and failures.
+- 🌡️ **Temperatures** — nozzle and bed with targets, now managed via dedicated UI modals.
+- 💡 **Chamber light** toggle (works regardless of whether the printer is running).
+- 🎛️ **Print speed** — dedicated dialog for Silent / Standard / Sport / Ludicrous modes.
+- 📱 **Refined UI/UX** — pull-to-refresh functionality, improved navigation, intuitive familiar layout, and respects Android safe area insets for edge-to-edge display.
+- 🧵 **AMS filament info** — per-unit humidity grade (A–E scale), per-slot type and colour.
+- 🪡 **External spool** display.
+- 🕹️ **Manual jog controls** — OrcaSlicer-style XY wheel, extruder column, Z/bed row with ±1/±10 mm steps and a home button.
+- 🛠️ **MQTT Debug Page** — built-in view for troubleshooting raw telemetry and error handling.
+- 💾 **Persistent credentials** — stored in app data via `tauri-plugin-store`, not in browser storage.
 
 ---
 
@@ -79,12 +82,12 @@ You'll need your printer's **IP address**, **access code** (touchscreen → Sett
 
 ## Roadmap / TODO
 
-- [ ] **Multiple printer support** — switch between printers, per-printer credential storage, printer picker on launch
+- [x] **Multiple printer support** — switch between printers, per-printer credential storage, printer picker on launch
+- [x] **Print file management over FTP (port 990)**
+- [x] **Push notifications for print completion and failures**
 - [ ] **MakerWorld-equivalent integration** — some kind of browse/download flow for print files without going through the official app. Not exactly sure what shape this takes yet, but it's on the list. We'll see what's possible.
 - [ ] Fan speed control
 - [ ] AMS filament remaining percentage (when reported by firmware)
-- [ ] Print file management over FTP (port 990)
-- [ ] Push notifications for print completion and failures
 
 ---
 

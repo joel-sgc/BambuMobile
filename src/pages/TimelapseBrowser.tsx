@@ -355,7 +355,7 @@ export default function TimelapseBrowser({
                     onPointerDown={() => startLongPress(vid.name)}
                     onPointerUp={cancelLongPress}
                     onPointerCancel={cancelLongPress}
-                    onPointerMove={cancelLongPress}
+                    onPointerLeave={cancelLongPress}
                     onClick={() => {
                       if (didLongPressRef.current) {
                         didLongPressRef.current = false;

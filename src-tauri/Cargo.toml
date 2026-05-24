@@ -31,3 +31,5 @@ tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.25"
 base64 = "0.22"
 socket2 = { version = "0.5", features = ["all"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }

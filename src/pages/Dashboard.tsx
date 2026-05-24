@@ -1,20 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification';
-import type { PrinterStatus } from '../vite-env';
 import { hmsDescription } from '../utils/hmsErrors';
 import PullToRefresh from 'react-simple-pull-to-refresh';
+import { usePrinter } from '../context/PrinterContext';
 
 import Section from '../components/Section';
 import PrintStatusCard from '../components/PrintStatusCard';
 import TempGauge from '../components/TempGauge';
 import AmsView from '../components/AmsView';
-import ExternalSpool from '../components/ExternalSpool';
+import ExternalSpool, { VT_TRAY_ID } from '../components/ExternalSpool';
 import SpeedGauge from '../components/SpeedGauge';
 import JogControls from '../components/JogControls';
 import ErrorPopup from '../components/ErrorPopup';
@@ -25,7 +24,6 @@ async function notify(title: string, body: string) {
     const perm = await requestPermission();
     granted = perm === 'granted';
   }
-
   if (granted) sendNotification({ title, body, largeBody: body });
 }
 
@@ -36,72 +34,57 @@ export default function Dashboard({
   onMenuOpen: () => void;
   serial?: string;
 }) {
-  const [status, setStatus] = useState<PrinterStatus | null>(null);
-  const [frameData, setFrameData] = useState<string | null>(null);
+  // status and frameData come from the shared context — always populated even
+  // after navigating away and back, so there's no loading flash on re-mount.
+  const { status, frameData, refresh } = usePrinter();
+
   const [printPreview, setPrintPreview] = useState<string | null>(null);
   const [lightOn, setLightOn] = useState(false);
   const [speedLevel, setSpeedLevel] = useState(2);
   const [popupCodes, setPopupCodes] = useState<string[]>([]);
+  const [selectedTrayId, setSelectedTrayId] = useState<number | null>(null);
+  const [filamentBusy, setFilamentBusy] = useState(false);
   const lightPendingUntil = useRef(0);
   const speedPendingUntil = useRef(0);
   const previewJobRef = useRef('');
   const prevHmsRef = useRef<string[]>([]);
   const prevGcodeStateRef = useRef('');
+  // Keep serial in a ref so the status effect closure always has the current value
+  // without needing to be in the dependency array.
+  const serialRef = useRef(serial);
+  serialRef.current = serial;
 
+  // React to every status update: sync light/speed UI and fire notifications.
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible')
-        invoke<PrinterStatus>('get_status')
-          .then(setStatus)
-          .catch(() => {});
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, []);
+    if (!status) return;
+    const now = Date.now();
+    if (now > lightPendingUntil.current) setLightOn(status.chamber_light);
+    if (now > speedPendingUntil.current) setSpeedLevel(status.spd_lvl || 2);
 
-  useEffect(() => {
-    invoke<PrinterStatus>('get_status')
-      .then(setStatus)
-      .catch(() => {});
-
-    const unlistenStatus = listen<PrinterStatus>('printer-status', (e) => {
-      const payload = e.payload;
-      setStatus(payload);
-      const now = Date.now();
-      if (now > lightPendingUntil.current) setLightOn(payload.chamber_light);
-      if (now > speedPendingUntil.current) setSpeedLevel(payload.spd_lvl || 2);
-
-      // Detect new HMS error codes
-      const newCodes = (payload.hms ?? []).filter(
-        (c) => !prevHmsRef.current.includes(c),
-      );
-      if (newCodes.length > 0) {
-        setPopupCodes(newCodes);
-        const body = newCodes.map((c) => hmsDescription(c, serial)).join('\n');
-        notify('Printer Alert', body);
-      }
-      prevHmsRef.current = payload.hms ?? [];
-
-      // Detect print completion
-      const prev = prevGcodeStateRef.current;
-      const next = payload.gcode_state;
-      if (prev === 'RUNNING' && next === 'FINISH') {
-        const jobName = payload.subtask_name || 'Your print';
-        notify('Print Complete', `${jobName} has finished printing.`);
-      }
-      prevGcodeStateRef.current = next;
-    });
-
-    const unlistenCamera = listen<string>('camera-frame', (e) =>
-      setFrameData(`data:image/jpeg;base64,${e.payload}`),
+    // Detect new HMS error codes
+    const newCodes = (status.hms ?? []).filter(
+      (c) => !prevHmsRef.current.includes(c),
     );
+    if (newCodes.length > 0) {
+      setPopupCodes(newCodes);
+      const body = newCodes
+        .map((c) => hmsDescription(c, serialRef.current))
+        .join('\n');
+      notify('Printer Alert', body);
+    }
+    prevHmsRef.current = status.hms ?? [];
 
-    return () => {
-      unlistenStatus.then((f) => f());
-      unlistenCamera.then((f) => f());
-    };
-  }, []);
+    // Detect print completion
+    const prev = prevGcodeStateRef.current;
+    const next = status.gcode_state;
+    if (prev === 'RUNNING' && next === 'FINISH') {
+      const jobName = status.subtask_name || 'Your print';
+      notify('Print Complete', `${jobName} has finished printing.`);
+    }
+    prevGcodeStateRef.current = next;
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch print preview whenever the active job changes.
   useEffect(() => {
     const name = status?.subtask_name ?? '';
     if (name === previewJobRef.current) return;
@@ -114,12 +97,8 @@ export default function Dashboard({
       subtaskName: name,
       taskId: status?.task_id ?? '',
     })
-      .then((url) => {
-        setPrintPreview(url);
-      })
-      .catch(() => {
-        setPrintPreview(null);
-      });
+      .then(setPrintPreview)
+      .catch(() => setPrintPreview(null));
   }, [status?.subtask_name]);
 
   async function sendCommand(cmd: string) {
@@ -146,6 +125,29 @@ export default function Dashboard({
     setSpeedLevel(level);
     speedPendingUntil.current = Date.now() + 5000;
     await invoke('set_print_speed', { level }).catch(console.error);
+  }
+
+  async function handleLoadFilament() {
+    if (selectedTrayId === null) return;
+    setFilamentBusy(true);
+    try {
+      await invoke('load_filament', { trayId: selectedTrayId });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFilamentBusy(false);
+    }
+  }
+
+  async function handleUnloadFilament() {
+    setFilamentBusy(true);
+    try {
+      await invoke('unload_filament');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFilamentBusy(false);
+    }
   }
 
   const hasFilament =
@@ -179,11 +181,7 @@ export default function Dashboard({
       </div>
 
       <PullToRefresh
-        onRefresh={() =>
-          invoke<PrinterStatus>('get_status')
-            .then(setStatus)
-            .catch(() => {})
-        }
+        onRefresh={refresh}
         className='flex-1 overflow-y-auto'>
         <div className='flex flex-col gap-3 p-4 pb-8'>
           {status && status.hms.length > 0 && (
@@ -376,7 +374,12 @@ export default function Dashboard({
                     <span className='text-gray-300'>AMS</span>
                   </div>
                 }>
-                <AmsView ams={status!.ams} />
+                <AmsView
+                  ams={status!.ams}
+                  selectedTrayId={selectedTrayId}
+                  activeGlobalTrayId={status!.tray_now}
+                  onSelectTray={(id) => setSelectedTrayId((prev) => prev === id ? null : id)}
+                />
               </Section>
             )}
 
@@ -404,10 +407,33 @@ export default function Dashboard({
                     <span className='text-gray-300'>Ext. Fila.</span>
                   </div>
                 }>
-                <ExternalSpool tray={status!.vt_tray} />
+                <ExternalSpool
+                  tray={status!.vt_tray}
+                  selected={selectedTrayId === VT_TRAY_ID}
+                  active={status!.tray_now === VT_TRAY_ID}
+                  onSelect={() => setSelectedTrayId((prev) => prev === VT_TRAY_ID ? null : VT_TRAY_ID)}
+                />
               </Section>
             )}
           </div>
+
+          {/* Load / Unload filament controls */}
+          {hasFilament && (
+            <div className='flex gap-3'>
+              <button
+                onClick={handleUnloadFilament}
+                disabled={filamentBusy}
+                className='flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 text-sm font-medium rounded-xl py-3 transition-colors'>
+                Unload
+              </button>
+              <button
+                onClick={handleLoadFilament}
+                disabled={filamentBusy || selectedTrayId === null}
+                className='flex-1 bg-teal-700 hover:bg-teal-600 disabled:opacity-40 text-white text-sm font-medium rounded-xl py-3 transition-colors'>
+                {selectedTrayId === null ? 'Select a slot' : 'Load'}
+              </button>
+            </div>
+          )}
 
           {status && (
             <div className='bg-zinc-800 rounded-xl overflow-hidden p-4'>

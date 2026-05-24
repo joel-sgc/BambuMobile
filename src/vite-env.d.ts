@@ -14,6 +14,8 @@ export interface AmsTray {
   tray_type: string;
   color: string;
   name: string;
+  /** Default print temperature for this filament in °C */
+  tray_temp: number;
 }
 
 export interface AmsUnit {
@@ -41,4 +43,6 @@ export interface PrinterStatus {
   task_id: string;
   hms: string[];
   device_name: string;
+  /** Global slot ID of the tray currently loaded in the nozzle. 255 = none, 254 = external. */
+  tray_now: number;
 }

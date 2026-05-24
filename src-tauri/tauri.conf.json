@@ -31,5 +31,18 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["bambustudio", "bambustudioopen"]
+      },
+      "mobile": [
+        {
+          "scheme": ["bambustudio", "bambustudioopen"],
+          "appLink": false
+        }
+      ]
+    }
   }
 }

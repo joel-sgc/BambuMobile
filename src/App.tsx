@@ -1,3 +1,4 @@
+import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -12,6 +13,7 @@ import DebugPage from './pages/DebugPage';
 import FileManager from './pages/FileManager';
 import TimelapseBrowser from './pages/TimelapseBrowser';
 import Sidebar, { type Page } from './pages/Sidebar';
+import { PrinterProvider } from './context/PrinterContext';
 
 type Phase = 'connecting' | 'connected' | 'error';
 
@@ -31,6 +33,7 @@ export default function App() {
   const [deviceName, setDeviceName] = useState('');
   const backActionRef = useRef<() => boolean>(() => false);
   const activePrinterIdRef = useRef<string | null>(null);
+  const skipNextArmRef = useRef(false);
 
   const activePrinter = printers.find((p) => p.id === activePrinterId) ?? null;
   activePrinterIdRef.current = activePrinterId;
@@ -197,6 +200,9 @@ export default function App() {
     if (page === 'files' && filePath !== '/') {
       const trimmed = filePath.endsWith('/') ? filePath.slice(0, -1) : filePath;
       setFilePath(trimmed.substring(0, trimmed.lastIndexOf('/') + 1) || '/');
+      // We pushed a history entry when entering this directory, so the popstate
+      // already consumed it — don't push another one.
+      skipNextArmRef.current = true;
       return true;
     }
     if (page !== 'dashboard') {
@@ -206,19 +212,42 @@ export default function App() {
     return false;
   };
 
+  const armHistory = () =>
+    window.history.pushState(null, '', window.location.pathname + '#step=' + Date.now());
+
   useEffect(() => {
-    const arm = () =>
-      window.history.pushState(
-        null,
-        '',
-        window.location.pathname + '#step=' + Date.now(),
-      );
-    arm();
+    armHistory();
     const handle = () => {
-      if (backActionRef.current()) arm();
+      skipNextArmRef.current = false;
+      if (backActionRef.current() && !skipNextArmRef.current) {
+        armHistory();
+      }
     };
     window.addEventListener('popstate', handle);
     return () => window.removeEventListener('popstate', handle);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    // Scenario 1: The app was dead, and clicking the link launched it.
+    // We check the startup arguments.
+    getCurrent().then((urls) => {
+      if (urls && urls.length > 0) {
+        console.log('App launched via link:', urls[0]);
+        // Parse the bambustudio:// URL here
+      }
+    });
+
+    // Scenario 2: The app is already running in the background.
+    // The Single Instance plugin forwards the event to this listener.
+    const unlistenPromise = onOpenUrl((urls) => {
+      console.log('Link received while running:', urls[0]);
+      // Parse the bambustudio:// URL here
+    });
+
+    // Cleanup the listener when the component unmounts
+    return () => {
+      unlistenPromise.then((unlistenFn) => unlistenFn());
+    };
   }, []);
 
   if (phase === 'connecting')
@@ -269,7 +298,11 @@ export default function App() {
   }
 
   return (
-    <>
+    // PrinterProvider subscribes to printer-status and camera-frame exactly
+    // once for the whole connected session.  Navigating between sidebar pages
+    // never tears down these subscriptions, so there is no flash of null status
+    // or blank camera when switching screens.
+    <PrinterProvider>
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -291,6 +324,7 @@ export default function App() {
           onMenuOpen={() => setSidebarOpen(true)}
           path={filePath}
           onPathChange={setFilePath}
+          onDirEnter={armHistory}
         />
       )}
 
@@ -301,6 +335,6 @@ export default function App() {
       {page === 'debug' && (
         <DebugPage onMenuOpen={() => setSidebarOpen(true)} />
       )}
-    </>
+    </PrinterProvider>
   );
 }

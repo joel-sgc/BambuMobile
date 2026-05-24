@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 openbu-mock
+slicer-server
 node_modules
 dist
 dist-ssr

@@ -21,7 +21,8 @@ const isVideo = (n: string) =>
   VIDEO_EXTS.some((e) => n.toLowerCase().endsWith(e));
 const isImage = (n: string) =>
   IMAGE_EXTS.some((e) => n.toLowerCase().endsWith(e));
-const isGcode = (n: string) => n.toLowerCase().endsWith('.gcode');
+const isGcode = (n: string) =>
+  n.toLowerCase().endsWith('.gcode') || n.toLowerCase().endsWith('.gcode.3mf');
 
 function canPreview(name: string) {
   return isImage(name) || isVideo(name);
@@ -55,10 +56,12 @@ export default function FileManager({
   onMenuOpen,
   path,
   onPathChange,
+  onDirEnter,
 }: {
   onMenuOpen: () => void;
   path: string;
   onPathChange: (p: string) => void;
+  onDirEnter?: () => void;
 }) {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -276,6 +279,7 @@ export default function FileManager({
 
   function enterDir(entry: FileEntry) {
     if (!entry.is_dir) return;
+    onDirEnter?.(); // push a history entry so swipe-back has something to consume
     onPathChange(
       path.endsWith('/') ? `${path}${entry.name}/` : `${path}/${entry.name}/`,
     );

@@ -27,16 +27,20 @@ const FTP_DIR = '/timelapse/';
 
 type ThumbState = 'idle' | 'loading' | 'loaded' | 'failed';
 
+// Module-level thumbnail cache — survives component unmount so navigating away
+// and back doesn't restart the slow sequential FTP thumbnail-loading loop.
+// Keyed by video filename; value is a full data-URI (mime baked in).
+const thumbCache: Record<string, string> = {};
+const thumbStateCache: Record<string, ThumbState> = {};
+
 export default function TimelapseBrowser({
   onMenuOpen,
 }: {
   onMenuOpen: () => void;
 }) {
   const [videos, setVideos] = useState<FileEntry[]>([]);
-  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
-  const [thumbStates, setThumbStates] = useState<Record<string, ThumbState>>(
-    {},
-  );
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>(thumbCache);
+  const [thumbStates, setThumbStates] = useState<Record<string, ThumbState>>(thumbStateCache);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectMode, setSelectMode] = useState(false);
@@ -46,7 +50,7 @@ export default function TimelapseBrowser({
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPressRef = useRef(false);
-  const attemptedRef = useRef<Set<string>>(new Set());
+  const attemptedRef = useRef<Set<string>>(new Set(Object.keys(thumbStateCache)));
   const loadGenRef = useRef(0);
 
   useEffect(() => {
@@ -62,6 +66,9 @@ export default function TimelapseBrowser({
     attemptedRef.current.clear();
     setThumbnails({});
     setThumbStates({});
+    // Bust the module-level cache so a manual refresh fetches fresh thumbnails.
+    Object.keys(thumbCache).forEach((k) => delete thumbCache[k]);
+    Object.keys(thumbStateCache).forEach((k) => delete thumbStateCache[k]);
     try {
       const all = await invoke<FileEntry[]>('list_files', { path: FTP_DIR });
       if (loadGenRef.current !== gen) return;
@@ -98,11 +105,11 @@ export default function TimelapseBrowser({
         try {
           const b64 = await invoke<string>('fetch_thumbnail', { path });
           // Store as a full data URL so the MIME type is baked in
-          setThumbnails((t) => ({
-            ...t,
-            [v.name]: `data:${mime};base64,${b64}`,
-          }));
+          const dataUrl = `data:${mime};base64,${b64}`;
+          setThumbnails((t) => ({ ...t, [v.name]: dataUrl }));
+          thumbCache[v.name] = dataUrl;
           setThumbStates((s) => ({ ...s, [v.name]: 'loaded' }));
+          thumbStateCache[v.name] = 'loaded';
           loaded = true;
           break;
         } catch {
@@ -111,6 +118,7 @@ export default function TimelapseBrowser({
       }
       if (!loaded) {
         setThumbStates((s) => ({ ...s, [v.name]: 'failed' }));
+        thumbStateCache[v.name] = 'failed';
       }
     }
   }
@@ -163,6 +171,9 @@ export default function TimelapseBrowser({
           delete n[name];
           return n;
         });
+        // Keep module-level cache in sync.
+        delete thumbCache[name];
+        delete thumbStateCache[name];
       } catch (e) {
         errors.push(String(e));
       }

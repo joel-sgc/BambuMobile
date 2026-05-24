@@ -8,6 +8,8 @@
     "opener:default",
     "store:default",
     "notification:default",
+    "core:event:default",
+    "deep-link:default",
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://makerworld.com/**" }]

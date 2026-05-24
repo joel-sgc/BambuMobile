@@ -120,6 +120,161 @@ impl Default for AmsTray {
     }
 }
 
+// ── Android notification plugin handle (mobile only) ─────────────────────────
+//
+// On Android the foreground-service notification must be driven from Rust so
+// it keeps updating even when Android suspends WebView JavaScript execution
+// (which happens whenever the screen turns off / app is backgrounded).
+//
+// `api.register_android_plugin` (called in the plugin setup below) registers
+// the Kotlin PrintNotificationPlugin and returns a PluginHandle we can call
+// directly — bypassing the JS bridge entirely.
+
+/// Managed state: handle to the Android PrintNotificationPlugin.
+/// Stored via `app.manage()` in the plugin setup; retrieved later with
+/// `app.try_state::<PrintNotifHandle>()` inside the MQTT task.
+#[cfg(mobile)]
+pub(crate) struct PrintNotifHandle(pub tauri::plugin::PluginHandle<tauri::Wry>);
+
+/// Payload for startNotification / updateNotification commands.
+#[cfg(mobile)]
+#[derive(Serialize)]
+struct NotifArgs {
+    title: String,
+    body: String,
+    /// Print progress 0-100.  The Kotlin side uses this to drive a native
+    /// progress bar on the notification.  0 means "no bar" (pre-print stages).
+    progress: u8,
+}
+
+/// Formats layer / progress / ETA into a compact notification body string.
+/// Mirrors the `buildNotifBody` function in PrinterContext.tsx.
+#[cfg(mobile)]
+fn build_notif_body_rs(s: &PrinterStatus) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if s.total_layer_num > 0 {
+        parts.push(format!("Layer {}/{}", s.layer_num, s.total_layer_num));
+    }
+    if s.progress > 0 {
+        parts.push(format!("{}%", s.progress));
+    }
+    if s.remaining_mins > 0 {
+        let h = s.remaining_mins / 60;
+        let m = s.remaining_mins % 60;
+        if h > 0 {
+            parts.push(if m > 0 {
+                format!("{}h {}m left", h, m)
+            } else {
+                format!("{}h left", h)
+            });
+        } else {
+            parts.push(format!("{}m left", m));
+        }
+    }
+    parts.join(" · ")
+}
+
+/// Drives the Android foreground-service notification entirely from Rust.
+///
+/// Call on every MQTT status update.  Handles RUNNING / PAUSE / stop
+/// transitions without going through the JavaScript layer, so the notification
+/// continues to update even when the WebView is suspended in the background.
+///
+/// Rate-limiting: updates fire on every layer change, or at least every 10 s
+/// (the heartbeat also serves to re-post the notification after Android 14+
+/// users swipe it away — it reappears within 10 s).
+#[cfg(mobile)]
+fn drive_notification(
+    handle: &tauri::plugin::PluginHandle<tauri::Wry>,
+    st: &PrinterStatus,
+    prev_gcode_state: &mut String,
+    prev_layer: &mut u32,
+    last_notif_at: &mut std::time::Instant,
+) {
+    let next = st.gcode_state.as_str();
+    let prev = prev_gcode_state.as_str();
+    let layer_changed = st.layer_num != *prev_layer;
+    let job_name = if st.subtask_name.is_empty() {
+        "Print in progress"
+    } else {
+        &st.subtask_name
+    };
+
+    match next {
+        "RUNNING" => {
+            let body = build_notif_body_rs(st);
+            let now = std::time::Instant::now();
+            if prev != "RUNNING" {
+                // Just started (or resumed from pause) — start the service.
+                let _ = handle.run_mobile_plugin::<serde_json::Value>(
+                    "startNotification",
+                    NotifArgs {
+                        title: format!("Printing: {}", job_name),
+                        body,
+                        progress: st.progress,
+                    },
+                );
+                *last_notif_at = now;
+            } else if layer_changed || now.duration_since(*last_notif_at).as_millis() >= 10_000 {
+                // New layer or 10-second heartbeat — update / re-post.
+                let _ = handle.run_mobile_plugin::<serde_json::Value>(
+                    "updateNotification",
+                    NotifArgs {
+                        title: format!("Printing: {}", job_name),
+                        body,
+                        progress: st.progress,
+                    },
+                );
+                *last_notif_at = now;
+            }
+        }
+        "PAUSE" => {
+            let body = build_notif_body_rs(st);
+            let body = if body.is_empty() {
+                format!("{}%", st.progress)
+            } else {
+                body
+            };
+            let now = std::time::Instant::now();
+            if prev != "PAUSE" {
+                // Freshly paused — update title.
+                let _ = handle.run_mobile_plugin::<serde_json::Value>(
+                    "updateNotification",
+                    NotifArgs {
+                        title: format!("Paused: {}", job_name),
+                        body,
+                        progress: st.progress,
+                    },
+                );
+                *last_notif_at = now;
+            } else if now.duration_since(*last_notif_at).as_millis() >= 10_000 {
+                // Heartbeat while paused.
+                let _ = handle.run_mobile_plugin::<serde_json::Value>(
+                    "updateNotification",
+                    NotifArgs {
+                        title: format!("Paused: {}", job_name),
+                        body,
+                        progress: st.progress,
+                    },
+                );
+                *last_notif_at = now;
+            }
+        }
+        _ => {
+            if prev == "RUNNING" || prev == "PAUSE" {
+                // Print ended (FINISH, FAILED, …) — stop the foreground service.
+                let _ = handle.run_mobile_plugin::<serde_json::Value>(
+                    "stopNotification",
+                    serde_json::json!({}),
+                );
+            }
+        }
+    }
+
+    *prev_gcode_state = next.to_owned();
+    *prev_layer = st.layer_num;
+}
+
 // ── App state ─────────────────────────────────────────────────────────────────
 
 pub(crate) struct AppState {
@@ -857,6 +1012,17 @@ async fn connect_printer(
         })
         .to_string();
 
+        // Notification state — tracked in Rust so the foreground-service
+        // notification updates even when WebView JS is suspended in the background.
+        #[cfg(mobile)]
+        let mut prev_gcode_state_notif = String::new();
+        #[cfg(mobile)]
+        let mut prev_layer_notif = 0u32;
+        // Initialise far in the past so the very first RUNNING/PAUSE update fires.
+        #[cfg(mobile)]
+        let mut last_notif_at =
+            std::time::Instant::now() - std::time::Duration::from_secs(120);
+
         loop {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Packet::ConnAck(_))) => {
@@ -881,13 +1047,30 @@ async fn connect_printer(
                     if let Ok(raw) = std::str::from_utf8(&msg.payload) {
                         let _ = app_c.emit("mqtt-raw", raw);
                     }
-                    let mut st = status_c.lock().await;
-                    let prev_name = st.device_name.clone();
-                    parse_status(&msg.payload, &mut st);
-                    if st.device_name != prev_name && !st.device_name.is_empty() {
-                        let _ = app_c.emit("printer-name", &st.device_name);
+                    // Parse status and release the lock before any further work
+                    // to avoid holding a MutexGuard across the notification calls.
+                    let st_snapshot = {
+                        let mut st = status_c.lock().await;
+                        let prev_name = st.device_name.clone();
+                        parse_status(&msg.payload, &mut st);
+                        if st.device_name != prev_name && !st.device_name.is_empty() {
+                            let _ = app_c.emit("printer-name", &st.device_name);
+                        }
+                        st.clone()
+                    }; // MutexGuard dropped here
+                    let _ = app_c.emit("printer-status", &st_snapshot);
+                    // Drive the foreground-service notification directly from Rust
+                    // so it keeps updating even when the WebView is suspended.
+                    #[cfg(mobile)]
+                    if let Some(notif) = app_c.try_state::<PrintNotifHandle>() {
+                        drive_notification(
+                            &notif.0,
+                            &st_snapshot,
+                            &mut prev_gcode_state_notif,
+                            &mut prev_layer_notif,
+                            &mut last_notif_at,
+                        );
                     }
-                    let _ = app_c.emit("printer-status", st.clone());
                 }
                 Err(_) => {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -2045,10 +2228,51 @@ async fn inject_test_hms(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {
-        }))
-        .plugin(tauri_plugin_deep_link::init())    
+    let builder = tauri::Builder::default();
+
+    // single-instance is a desktop-only concept; the plugin crate gates its
+    // entire public API behind `#![cfg(not(android/ios))]`, so the `init`
+    // function does not exist in the Android / iOS build.
+    #[cfg(not(mobile))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}));
+
+    // Register the Android print-notification plugin.
+    //
+    // `register_android_plugin` calls PluginManager.load() via JNI, instantiating
+    // PrintNotificationPlugin with the Activity reference — replacing the manual
+    // PluginManager.load() that used to live in MainActivity.kt.
+    //
+    // The returned PluginHandle is stored as managed state (PrintNotifHandle) so
+    // the MQTT task can call startNotification / updateNotification / stopNotification
+    // directly from Rust, bypassing the JavaScript bridge.  This makes the
+    // foreground-service notification update even when the WebView is suspended
+    // in the background.
+    //
+    // TypeScript invocations (`invoke('plugin:printNotification|...')`) continue
+    // to work through the same handle — both paths converge on the same Kotlin
+    // plugin method.
+    #[cfg(mobile)]
+    let builder = builder.plugin(
+        tauri::plugin::Builder::<tauri::Wry, ()>::new("printNotification")
+            .setup(|app, api| {
+                match api.register_android_plugin(
+                    "com.joelsgc.bamboomobile",
+                    "PrintNotificationPlugin",
+                ) {
+                    Ok(handle) => {
+                        app.manage(PrintNotifHandle(handle));
+                    }
+                    Err(e) => {
+                        eprintln!("[PrintNotif] register_android_plugin failed: {:?}", e);
+                    }
+                }
+                Ok(())
+            })
+            .build(),
+    );
+
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())

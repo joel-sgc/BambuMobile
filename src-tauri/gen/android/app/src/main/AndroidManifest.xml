@@ -2,6 +2,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Foreground service (normal permission — no runtime prompt) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+      dataSync is the correct type for a service that transfers data to/from
+      a device over the network (TCP/IP to the printer via MQTT/FTP).
+      connectedDevice sounds right but on Android 15+ (targetSdk ≥ 35) it
+      is restricted to Bluetooth/NFC/USB — NOT Wi-Fi — and throws a
+      ForegroundServiceStartNotAllowedException for network-only connections.
+      dataSync only needs INTERNET + an active network connection, which we
+      always have when connected to the printer.  The 6-hour daily limit
+      only affects apps targeting API 35+ running Android 15+; for the
+      majority of prints this is more than sufficient.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Required on Android 13+ to show any notification (including the
+         foreground-service notification). Prompted at runtime by the
+         existing notification-permission flow in Dashboard.tsx. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
@@ -22,7 +42,34 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
+            <intent-filter >
+                <action android:name="android.intent.action.VIEW" />
+                <!-- ChromeOS ARC++ uses a different action for deep links -->
+                <action android:name="org.chromium.arc.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bambustudio" />
+                <data android:scheme="bambustudioopen" />
+                
+                
+                
+                
+                
+            </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
         </activity>
+
+        <!--
+          PrinterForegroundService keeps the process alive while a print is
+          running so the Rust MQTT loop continues to receive status updates
+          in the background.  foregroundServiceType must match the permission
+          declared above.
+        -->
+        <service
+            android:name=".PrinterForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

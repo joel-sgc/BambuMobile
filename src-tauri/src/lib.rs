@@ -1092,25 +1092,36 @@ async fn connect_printer(
         ip.clone(),
         serial.clone(),
         status.clone(),
-        app,
+        app.clone(),
     ));
     abort_handles.push(ssdp_handle.abort_handle());
     drop(ssdp_handle);
 
     *conn = Some(ConnectionHandles {
-        ip,
-        access_code,
-        serial,
+        ip: ip.clone(),
+        access_code: access_code.clone(),
+        serial: serial.clone(),
         mqtt_client,
         abort_handles,
         status,
     });
 
+    // Persist credentials to Android SharedPreferences so PrinterForegroundService
+    // can reconnect on its own if the process is killed (swipe-away) and restarted
+    // by Android's START_STICKY mechanism.
+    #[cfg(mobile)]
+    if let Some(notif) = app.try_state::<PrintNotifHandle>() {
+        let _ = notif.0.run_mobile_plugin::<serde_json::Value>(
+            "storeCredentials",
+            serde_json::json!({ "ip": ip, "access_code": access_code, "serial": serial }),
+        );
+    }
+
     Ok(())
 }
 
 #[tauri::command]
-async fn disconnect_printer(state: TauriState<'_, AppState>) -> Result<(), String> {
+async fn disconnect_printer(_app: AppHandle, state: TauriState<'_, AppState>) -> Result<(), String> {
     // Close the persistent FTP control connection
     let ftp_arc = Arc::clone(&state.ftp);
     tokio::task::spawn_blocking(move || {
@@ -1130,6 +1141,17 @@ async fn disconnect_printer(state: TauriState<'_, AppState>) -> Result<(), Strin
         }
         let _ = c.mqtt_client.disconnect().await;
     }
+
+    // Clear stored credentials so the service doesn't attempt a standalone
+    // reconnect — the user explicitly disconnected.
+    #[cfg(mobile)]
+    if let Some(notif) = _app.try_state::<PrintNotifHandle>() {
+        let _ = notif.0.run_mobile_plugin::<serde_json::Value>(
+            "clearCredentials",
+            serde_json::json!({}),
+        );
+    }
+
     Ok(())
 }
 
